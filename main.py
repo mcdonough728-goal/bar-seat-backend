@@ -41,11 +41,16 @@ def submit():
     avg = round(weighted_sum / weight_total, 1)
     return jsonify({"average": avg})
 
-@app.route("/seats/<place_id>")
-def seats(place_id):
+@app.route("/last-update/<place_id>")
+def last_update(place_id):
     reports = seat_reports.get(place_id)
     if not reports:
-        return jsonify({"average": None})
+        return jsonify({"minutes": None})
+
+    last_time = max(r["time"] for r in reports)
+    minutes_ago = int((datetime.utcnow() - last_time).total_seconds() / 60)
+
+    return jsonify({"minutes": minutes_ago})
 
     now = datetime.utcnow()
     weighted_sum = 0
