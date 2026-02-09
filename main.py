@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO
 from collections import defaultdict
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -12,16 +13,55 @@ seat_reports = defaultdict(list)
 @app.route("/submit", methods=["POST"])
 def submit():
     data = request.json
-    seat_reports[data["place_id"]].append(data["seats"])
-    avg = sum(seat_reports[data["place_id"]]) / len(seat_reports[data["place_id"]])
-    return jsonify({"average": round(avg, 1)})
+    place_id = data["place_id"]
+    seats = data["seats"]
+
+    # Store report with timestamp
+    seat_reports[place_id].append({
+        "seats": seats,
+        "time": datetime.utcnow()
+    })
+
+    now = datetime.utcnow()
+    weighted_sum = 0
+    weight_total = 0
+
+    for report in seat_reports[place_id]:
+        minutes_old = (now - report["time"]).total_seconds() / 60
+
+        # Fade reports after 60 minutes
+        weight = max(0, 60 - minutes_old)
+
+        weighted_sum += report["seats"] * weight
+        weight_total += weight
+
+    if weight_total == 0:
+        return jsonify({"average": None})
+
+    avg = round(weighted_sum / weight_total, 1)
+    return jsonify({"average": avg})
 
 @app.route("/seats/<place_id>")
 def seats(place_id):
-    reports = seat_reports.get(place_id, [])
+    reports = seat_reports.get(place_id)
     if not reports:
         return jsonify({"average": None})
-    return jsonify({"average": round(sum(reports)/len(reports), 1)})
+
+    now = datetime.utcnow()
+    weighted_sum = 0
+    weight_total = 0
+
+    for report in reports:
+        minutes_old = (now - report["time"]).total_seconds() / 60
+        weight = max(0, 60 - minutes_old)
+        weighted_sum += report["seats"] * weight
+        weight_total += weight
+
+    if weight_total == 0:
+        return jsonify({"average": None})
+
+    avg = round(weighted_sum / weight_total, 1)
+    return jsonify({"average": avg})
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
