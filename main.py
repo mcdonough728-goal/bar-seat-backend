@@ -41,16 +41,11 @@ def submit():
     avg = round(weighted_sum / weight_total, 1)
     return jsonify({"average": avg})
 
-@app.route("/last-update/<place_id>")
-def last_update(place_id):
+@app.route("/seats/<place_id>", methods=["GET"])
+def get_seats(place_id):
     reports = seat_reports.get(place_id)
     if not reports:
-        return jsonify({"minutes": None})
-
-    last_time = max(r["time"] for r in reports)
-    minutes_ago = int((datetime.utcnow() - last_time).total_seconds() / 60)
-
-    return jsonify({"minutes": minutes_ago})
+        return jsonify({"average": None})
 
     now = datetime.utcnow()
     weighted_sum = 0
@@ -68,5 +63,15 @@ def last_update(place_id):
     avg = round(weighted_sum / weight_total, 1)
     return jsonify({"average": avg})
 
-if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+@app.route("/last-update/<place_id>")
+def last_update(place_id):
+    reports = seat_reports.get(place_id)
+    if not reports:
+        return jsonify({"minutes": None})
+
+    last_time = max(r["time"] for r in reports)
+    minutes_ago = int((datetime.utcnow() - last_time).total_seconds() / 60)
+
+    return jsonify({"minutes": minutes_ago})
+
+   
