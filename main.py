@@ -3,6 +3,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 from collections import defaultdict
 from datetime import datetime
+import math
 
 app = Flask(__name__)
 CORS(app)
@@ -38,7 +39,7 @@ def submit():
     if weight_total == 0:
         return jsonify({"average": None})
 
-    avg = round(weighted_sum / weight_total, 1)
+    avg = math.floor(weighted_sum / weight_total)
     return jsonify({"average": avg})
 
 @app.route("/seats/<place_id>", methods=["GET"])
