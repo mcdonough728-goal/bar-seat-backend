@@ -10,10 +10,6 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-@app.route("/seats/test")
-def test_seats():
-    return "Seats route working"
-
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -54,7 +50,7 @@ def submit():
 # GET WEIGHTED AVERAGE
 # ----------------------------------------
 
-@app.route("/seats/<place_id>", methods=["GET"])
+@app.route("/seats/<path:place_id>", methods=["GET"])
 def get_seats(place_id):
 
     response = requests.get(
@@ -96,7 +92,7 @@ def get_seats(place_id):
 # LAST UPDATE TIME
 # ----------------------------------------
 
-@app.route("/last-update/<place_id>")
+@app.route("/last-update/<path:place_id>")
 def last_update(place_id):
 
     response = requests.get(
