@@ -58,11 +58,11 @@ def get_seats(place_id):
         headers=HEADERS
     )
 
-if response.status_code != 200:
-    return jsonify({
-        "status_code": response.status_code,
-        "error": response.text
-    }), 500
+    if response.status_code != 200:
+        return jsonify({
+            "status_code": response.status_code,
+            "error": response.text
+        }), 500
 
     rows = response.json()
 
@@ -75,7 +75,9 @@ if response.status_code != 200:
 
     for row in rows:
         seats = row["seats"]
-        created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+        created_at = datetime.fromisoformat(
+            row["created_at"].replace("Z", "+00:00")
+        )
 
         minutes_old = (now - created_at).total_seconds() / 60
         weight = max(0, 60 - minutes_old)
@@ -89,6 +91,7 @@ if response.status_code != 200:
     avg = math.floor(weighted_sum / weight_total)
 
     return jsonify({"average": avg})
+
 
 
 # ----------------------------------------
