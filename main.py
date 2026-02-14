@@ -61,7 +61,7 @@ def get_seats(place_id):
     if weight_total == 0:
         return jsonify({"average": None})
 
-    avg = round(weighted_sum / weight_total, 1)
+    avg = math.floor(weighted_sum / weight_total)
     return jsonify({"average": avg})
 
 @app.route("/last-update/<place_id>")
