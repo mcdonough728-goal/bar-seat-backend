@@ -58,8 +58,11 @@ def get_seats(place_id):
         headers=HEADERS
     )
 
-    if response.status_code != 200:
-        return jsonify({"average": None})
+if response.status_code != 200:
+    return jsonify({
+        "status_code": response.status_code,
+        "error": response.text
+    }), 500
 
     rows = response.json()
 
