@@ -15,7 +15,11 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-conn = psycopg2.connect(DATABASE_URL)
+conn = psycopg2.connect(
+    DATABASE_URL,
+    sslmode="require"
+)
+
 conn.autocommit = True
 
 
