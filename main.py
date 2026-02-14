@@ -10,9 +10,9 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-@app.route("/")
-def home():
-    return "Backend is running"
+@app.route("/seats/test")
+def test_seats():
+    return "Seats route working"
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
