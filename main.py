@@ -4,12 +4,28 @@ from flask_socketio import SocketIO
 from collections import defaultdict
 from datetime import datetime
 import math
+import psycopg2
+import os
+from urllib.parse import urlparse
+
 
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-seat_reports = defaultdict(list)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+url = urlparse(DATABASE_URL)
+
+conn = psycopg2.connect(
+    dbname=url.path[1:],
+    user=url.username,
+    password=url.password,
+    host=url.hostname,
+    port=url.port
+)
+
+conn.autocommit = True
 
 @app.route("/submit", methods=["POST"])
 def submit():
@@ -17,63 +33,77 @@ def submit():
     place_id = data["place_id"]
     seats = data["seats"]
 
-    # Store report with timestamp
-    seat_reports[place_id].append({
-        "seats": seats,
-        "time": datetime.utcnow()
-    })
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO seat_reports (place_id, seats)
+            VALUES (%s, %s)
+            """,
+            (place_id, seats),
+        )
 
-    now = datetime.utcnow()
-    weighted_sum = 0
-    weight_total = 0
-
-    for report in seat_reports[place_id]:
-        minutes_old = (now - report["time"]).total_seconds() / 60
-
-        # Fade reports after 60 minutes
-        weight = max(0, 60 - minutes_old)
-
-        weighted_sum += report["seats"] * weight
-        weight_total += weight
-
-    if weight_total == 0:
-        return jsonify({"average": None})
-
-    avg = math.floor(weighted_sum / weight_total)
-    return jsonify({"average": avg})
+    return jsonify({"success": True})
 
 @app.route("/seats/<place_id>", methods=["GET"])
 def get_seats(place_id):
-    reports = seat_reports.get(place_id)
-    if not reports:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT seats, created_at
+            FROM seat_reports
+            WHERE place_id = %s
+            """,
+            (place_id,),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
         return jsonify({"average": None})
+
+    from datetime import datetime
+    import math
 
     now = datetime.utcnow()
     weighted_sum = 0
     weight_total = 0
 
-    for report in reports:
-        minutes_old = (now - report["time"]).total_seconds() / 60
+    for seats, created_at in rows:
+        minutes_old = (now - created_at).total_seconds() / 60
         weight = max(0, 60 - minutes_old)
-        weighted_sum += report["seats"] * weight
+
+        weighted_sum += seats * weight
         weight_total += weight
 
     if weight_total == 0:
         return jsonify({"average": None})
 
     avg = math.floor(weighted_sum / weight_total)
+
     return jsonify({"average": avg})
 
 @app.route("/last-update/<place_id>")
 def last_update(place_id):
-    reports = seat_reports.get(place_id)
-    if not reports:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT MAX(created_at)
+            FROM seat_reports
+            WHERE place_id = %s
+            """,
+            (place_id,),
+        )
+        result = cur.fetchone()
+
+    if not result or not result[0]:
         return jsonify({"minutes": None})
 
-    last_time = max(r["time"] for r in reports)
-    minutes_ago = int((datetime.utcnow() - last_time).total_seconds() / 60)
+    from datetime import datetime
+
+    minutes_ago = int((datetime.utcnow() - result[0]).total_seconds() / 60)
 
     return jsonify({"minutes": minutes_ago})
+
+
 
 import os
 
