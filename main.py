@@ -15,17 +15,9 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-url = urlparse(DATABASE_URL)
-
-conn = psycopg2.connect(
-    dbname=url.path[1:],
-    user=url.username,
-    password=url.password,
-    host=url.hostname,
-    port=url.port
-)
-
+conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True
+
 
 @app.route("/submit", methods=["POST"])
 def submit():
