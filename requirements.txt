@@ -1,6 +1,6 @@
 Flask
 flask-cors
 flask-socketio
-eventlet
-psycopg2-binary
+requests
+
 
