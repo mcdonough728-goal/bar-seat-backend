@@ -58,25 +58,29 @@ def get_seats(place_id):
         headers=HEADERS
     )
 
-if response.status_code != 200:
-    return jsonify({
-        "where": "supabase GET /seat_reports",
-        "status_code": response.status_code,
-        "response_text": response.text
-    }), 500
+    if response.status_code != 200:
+        return jsonify({
+            "where": "supabase GET /seat_reports",
+            "status_code": response.status_code,
+            "response_text": response.text
+        }), 500
 
     rows = response.json()
 
     if not rows:
         return jsonify({"average": None})
 
-    now = datetime.utcnow()
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+
     weighted_sum = 0
     weight_total = 0
 
     for row in rows:
         seats = row["seats"]
-        created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+        created_at = datetime.fromisoformat(
+            row["created_at"].replace("Z", "+00:00")
+        )
 
         minutes_old = (now - created_at).total_seconds() / 60
         weight = max(0, 60 - minutes_old)
@@ -104,20 +108,26 @@ def last_update(place_id):
         headers=HEADERS
     )
 
-if response.status_code != 200:
-    return jsonify({
-        "where": "supabase GET /seat_reports last-update",
-        "status_code": response.status_code,
-        "response_text": response.text
-    }), 500
+    if response.status_code != 200:
+        return jsonify({
+            "where": "supabase GET /seat_reports last-update",
+            "status_code": response.status_code,
+            "response_text": response.text
+        }), 500
 
     rows = response.json()
 
     if not rows:
         return jsonify({"minutes": None})
 
-    created_at = datetime.fromisoformat(rows[0]["created_at"].replace("Z", "+00:00"))
-    minutes_ago = int((datetime.utcnow() - created_at).total_seconds() / 60)
+    from datetime import timezone
+    created_at = datetime.fromisoformat(
+        rows[0]["created_at"].replace("Z", "+00:00")
+    )
+
+    minutes_ago = int(
+        (datetime.now(timezone.utc) - created_at).total_seconds() / 60
+    )
 
     return jsonify({"minutes": minutes_ago})
 
