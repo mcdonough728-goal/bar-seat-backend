@@ -75,9 +75,7 @@ def get_seats(place_id):
 
     for row in rows:
         seats = row["seats"]
-        created_at = datetime.fromisoformat(
-            row["created_at"].replace("Z", "+00:00")
-        )
+        created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
 
         minutes_old = (now - created_at).total_seconds() / 60
         weight = max(0, 60 - minutes_old)
@@ -89,7 +87,6 @@ def get_seats(place_id):
         return jsonify({"average": None})
 
     avg = math.floor(weighted_sum / weight_total)
-
     return jsonify({"average": avg})
 
 
