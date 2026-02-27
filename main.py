@@ -58,11 +58,12 @@ def get_seats(place_id):
         headers=HEADERS
     )
 
-    if response.status_code != 200:
-        return jsonify({
-            "status_code": response.status_code,
-            "error": response.text
-        }), 500
+if response.status_code != 200:
+    return jsonify({
+        "where": "supabase GET /seat_reports",
+        "status_code": response.status_code,
+        "response_text": response.text
+    }), 500
 
     rows = response.json()
 
@@ -103,8 +104,12 @@ def last_update(place_id):
         headers=HEADERS
     )
 
-    if response.status_code != 200:
-        return jsonify({"minutes": None})
+if response.status_code != 200:
+    return jsonify({
+        "where": "supabase GET /seat_reports last-update",
+        "status_code": response.status_code,
+        "response_text": response.text
+    }), 500
 
     rows = response.json()
 
