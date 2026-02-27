@@ -50,49 +50,46 @@ def submit():
 # GET WEIGHTED AVERAGE
 # ----------------------------------------
 
-@app.route("/seats/<path:place_id>", methods=["GET"])
-def get_seats(place_id):
+@app.route("/status/<path:place_id>", methods=["GET"])
+def status(place_id):
+    
+    latest = requests.get(
+        f"{SUPABASE_URL}/rest/v1/seat_reports?place_id=eq.{place_id}&order=created_at.desc&limit=1",
+        headers=HEADERS
+    )
+    if latest.status_code != 200:
+        return jsonify({"average": None, "minutes": None}), 200
+    latest_rows = latest.json()
+    if not latest_rows:
+        return jsonify({"average": None, "minutes": None}), 200
 
-    response = requests.get(
+    all_rows_res = requests.get(
         f"{SUPABASE_URL}/rest/v1/seat_reports?place_id=eq.{place_id}",
         headers=HEADERS
     )
-
-    if response.status_code != 200:
-        return jsonify({
-            "where": "supabase GET /seat_reports",
-            "status_code": response.status_code,
-            "response_text": response.text
-        }), 500
-
-    rows = response.json()
-
-    if not rows:
-        return jsonify({"average": None})
+    if all_rows_res.status_code != 200:
+        return jsonify({"average": None, "minutes": None}), 200
+    rows = all_rows_res.json()
 
     from datetime import timezone
     now = datetime.now(timezone.utc)
 
     weighted_sum = 0
     weight_total = 0
-
     for row in rows:
         seats = row["seats"]
-        created_at = datetime.fromisoformat(
-            row["created_at"].replace("Z", "+00:00")
-        )
-
+        created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
         minutes_old = (now - created_at).total_seconds() / 60
         weight = max(0, 60 - minutes_old)
-
         weighted_sum += seats * weight
         weight_total += weight
 
-    if weight_total == 0:
-        return jsonify({"average": None})
+    avg = None if weight_total == 0 else math.floor(weighted_sum / weight_total)
 
-    avg = math.floor(weighted_sum / weight_total)
-    return jsonify({"average": avg})
+    latest_created_at = datetime.fromisoformat(latest_rows[0]["created_at"].replace("Z", "+00:00"))
+    minutes_ago = int((now - latest_created_at).total_seconds() / 60)
+
+    return jsonify({"average": avg, "minutes": minutes_ago})
 
 
 
