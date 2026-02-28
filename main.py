@@ -91,7 +91,76 @@ def status(place_id):
 
     return jsonify({"average": avg, "minutes": minutes_ago})
 
+# ----------------------------------------
+# STATUS BATCH
+# ----------------------------------------
 
+@app.route("/status-batch", methods=["POST"])
+def status_batch():
+    data = request.json or {}
+    place_ids = data.get("place_ids", [])
+
+    if not isinstance(place_ids, list) or len(place_ids) == 0:
+        return jsonify({"statuses": {}})
+
+    quoted = ",".join([f'"{pid}"' for pid in place_ids])
+
+    url = (
+        f"{SUPABASE_URL}/rest/v1/seat_reports"
+        f"?place_id=in.({quoted})"
+        f"&select=place_id,seats,created_at"
+        f"&order=created_at.desc"
+    )
+
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code != 200:
+        return jsonify({
+            "where": "supabase batch GET /seat_reports",
+            "status_code": resp.status_code,
+            "response_text": resp.text
+        }), 500
+
+    rows = resp.json()
+
+    grouped = {}
+    for r in rows:
+        pid = r["place_id"]
+        grouped.setdefault(pid, []).append(r)
+
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+
+    statuses = {}
+    for pid in place_ids:
+        pid_rows = grouped.get(pid, [])
+        if not pid_rows:
+            statuses[pid] = {"average": None, "minutes": None}
+            continue
+
+        latest_created_at = datetime.fromisoformat(
+            pid_rows[0]["created_at"].replace("Z", "+00:00")
+        )
+        minutes_ago = int((now - latest_created_at).total_seconds() / 60)
+
+        weighted_sum = 0
+        weight_total = 0
+
+        for row in pid_rows:
+            seats = row["seats"]
+            created_at = datetime.fromisoformat(
+                row["created_at"].replace("Z", "+00:00")
+            )
+            minutes_old = (now - created_at).total_seconds() / 60
+            weight = max(0, 60 - minutes_old)
+
+            weighted_sum += seats * weight
+            weight_total += weight
+
+        avg = None if weight_total == 0 else math.floor(weighted_sum / weight_total)
+
+        statuses[pid] = {"average": avg, "minutes": minutes_ago}
+
+    return jsonify({"statuses": statuses})
 
 # ----------------------------------------
 # LAST UPDATE TIME
