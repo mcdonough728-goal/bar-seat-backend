@@ -166,6 +166,31 @@ def status_batch():
 # LAST UPDATE TIME
 # ----------------------------------------
 
+@app.route("/latest/<path:place_id>", methods=["GET"])
+def latest(place_id):
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/seat_reports?place_id=eq.{place_id}&select=seats,created_at&order=created_at.desc&limit=1",
+        headers=HEADERS
+    )
+
+    if response.status_code != 200:
+        return jsonify({"seats": None, "minutes": None}), 200
+
+    rows = response.json()
+    if not rows:
+        return jsonify({"seats": None, "minutes": None})
+
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    created_at = datetime.fromisoformat(rows[0]["created_at"].replace("Z", "+00:00"))
+    minutes_ago = int((now - created_at).total_seconds() / 60)
+
+    return jsonify({"seats": rows[0]["seats"], "minutes": minutes_ago})
+
+# ----------------------------------------
+# LATEST ENDPOINT
+# ----------------------------------------
+
 @app.route("/last-update/<path:place_id>")
 def last_update(place_id):
 
