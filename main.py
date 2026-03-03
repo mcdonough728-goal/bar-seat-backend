@@ -35,7 +35,6 @@ def submit():
         "seats": seats,
     }
 
-    # Only include if user answered Yes/No
     if has_bar_seating is not None:
         payload["has_bar_seating"] = bool(has_bar_seating)
 
