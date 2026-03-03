@@ -28,11 +28,16 @@ def submit():
     data = request.json
     place_id = data["place_id"]
     seats = data["seats"]
+    has_bar_seating = data.get("has_bar_seating")  # NEW
 
     payload = {
         "place_id": place_id,
-        "seats": seats
+        "seats": seats,
     }
+
+    # Only include if user answered Yes/No
+    if has_bar_seating is not None:
+        payload["has_bar_seating"] = bool(has_bar_seating)
 
     response = requests.post(
         f"{SUPABASE_URL}/rest/v1/seat_reports",
