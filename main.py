@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import math
 import os
 import requests
@@ -19,20 +19,79 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+COOLDOWN_MINUTES = 10
+
 # ----------------------------------------
 # SUBMIT SEAT REPORT
 # ----------------------------------------
 
 @app.route("/submit", methods=["POST"])
 def submit():
-    data = request.json
-    place_id = data["place_id"]
-    seats = data["seats"]
-    has_bar_seating = data.get("has_bar_seating")  # NEW
+    data = request.json or {}
 
+    place_id = data.get("place_id")
+    seats = data.get("seats")
+    has_bar_seating = data.get("has_bar_seating")
+    reporter_id = data.get("reporter_id")  # ✅ NEW
+
+    # Basic validation
+    if not place_id:
+        return jsonify({"error": "Missing place_id"}), 400
+
+    if reporter_id is None or str(reporter_id).strip() == "":
+        return jsonify({"error": "Missing reporter_id"}), 400
+
+    if seats is None:
+        return jsonify({"error": "Missing seats"}), 400
+
+    # Ensure seats is a non-negative number
+    try:
+        seats_num = int(seats)
+        if seats_num < 0:
+            return jsonify({"error": "Seats must be 0 or greater"}), 400
+    except Exception:
+        return jsonify({"error": "Seats must be a number"}), 400
+
+    # ----------------------------------------
+    # Cooldown check: has this reporter_id already submitted for this place recently?
+    # ----------------------------------------
+    since = datetime.now(timezone.utc) - timedelta(minutes=COOLDOWN_MINUTES)
+
+    # Query Supabase (REST) for a recent report from same reporter_id + place_id
+    check_params = {
+        "select": "id,created_at",
+        "place_id": f"eq.{place_id}",
+        "reporter_id": f"eq.{reporter_id}",
+        "created_at": f"gte.{since.isoformat()}",
+        "order": "created_at.desc",
+        "limit": "1",
+    }
+
+    check_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/seat_reports",
+        headers=HEADERS,
+        params=check_params,
+    )
+
+    if check_res.status_code != 200:
+        # If the check fails, we can still allow submit or block.
+        # Safer UX: allow submit to avoid breaking reports when Supabase hiccups.
+        print("COOLDOWN CHECK ERROR:", check_res.status_code, check_res.text)
+    else:
+        recent = check_res.json() or []
+        if len(recent) > 0:
+            return jsonify({
+                "error": "cooldown",
+                "message": f"Please wait {COOLDOWN_MINUTES} minutes before reporting again for this place."
+            }), 429
+
+    # ----------------------------------------
+    # Insert report
+    # ----------------------------------------
     payload = {
         "place_id": place_id,
-        "seats": seats,
+        "seats": seats_num,
+        "reporter_id": reporter_id,  # ✅ NEW
     }
 
     if has_bar_seating is not None:
@@ -48,7 +107,6 @@ def submit():
         return jsonify({"error": response.text}), 400
 
     return jsonify({"success": True})
-
 
 # ----------------------------------------
 # GET WEIGHTED AVERAGE
@@ -226,6 +284,38 @@ def last_update(place_id):
 
     return jsonify({"minutes": minutes_ago})
 
+# ----------------------------------------
+# Bar Seating Batch
+# ----------------------------------------
+
+@app.route("/bar-seating-batch", methods=["POST"])
+def bar_seating_batch():
+    data = request.json or {}
+    place_ids = data.get("place_ids") or []
+    if not isinstance(place_ids, list) or not place_ids:
+        return jsonify({"votes": {}})
+
+    in_list = ",".join(place_ids)
+
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/place_bar_seating_votes?place_id=in.({in_list})",
+        headers=HEADERS,
+    )
+
+    if resp.status_code != 200:
+        return jsonify({"error": resp.text}), 500
+
+    rows = resp.json()
+    out = {}
+    for r in rows:
+        pid = r["place_id"]
+        out[pid] = {
+            "yes": r.get("yes_votes", 0) or 0,
+            "no": r.get("no_votes", 0) or 0,
+            "total": r.get("total_votes", 0) or 0,
+        }
+
+    return jsonify({"votes": out})
 
 # ----------------------------------------
 
