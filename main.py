@@ -31,7 +31,13 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def get_place_lat_lng(place_id):
+def get_place_lat_lng(place_id: str):
+    # 1) Try cache first (fast, no Google quota)
+    cached = get_cached_place_lat_lng(place_id)
+    if cached is not None:
+        return cached
+
+    # 2) Not cached -> call Google once
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("Missing GOOGLE_API_KEY on server")
@@ -49,9 +55,62 @@ def get_place_lat_lng(place_id):
         raise RuntimeError(f"Places details error: {j.get('status')} {j.get('error_message')}")
 
     loc = j["result"]["geometry"]["location"]
-    return float(loc["lat"]), float(loc["lng"])
+    lat = float(loc["lat"])
+    lng = float(loc["lng"])
+
+    # 3) Store in cache for future (best-effort)
+    try:
+        upsert_cached_place_lat_lng(place_id, lat, lng)
+    except Exception as e:
+        print("PLACES_CACHE SAVE FAILED:", str(e))
+
+    return lat, lng
 
 COOLDOWN_MINUTES = 10
+
+def get_cached_place_lat_lng(place_id: str):
+    # GET one row by place_id
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/places_cache",
+        headers=HEADERS,
+        params={
+            "select": "place_id,lat,lng",
+            "place_id": f"eq.{place_id}",
+            "limit": "1",
+        },
+        timeout=10,
+    )
+
+    if res.status_code != 200:
+        print("PLACES_CACHE GET ERROR:", res.status_code, res.text)
+        return None
+
+    rows = res.json() or []
+    if not rows:
+        return None
+
+    row = rows[0]
+    return float(row["lat"]), float(row["lng"])
+
+
+def upsert_cached_place_lat_lng(place_id: str, lat: float, lng: float):
+    # Upsert (insert if new, update if exists)
+    payload = {
+        "place_id": place_id,
+        "lat": lat,
+        "lng": lng,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    res = requests.post(
+        f"{SUPABASE_URL}/rest/v1/places_cache",
+        headers={**HEADERS, "Prefer": "resolution=merge-duplicates"},
+        json=payload,
+        timeout=10,
+    )
+
+    if res.status_code not in (201, 200):
+        print("PLACES_CACHE UPSERT ERROR:", res.status_code, res.text)
 
 # ----------------------------------------
 # SUBMIT SEAT REPORT
