@@ -149,7 +149,7 @@ def submit():
     # ----------------------------------------
     # Proximity check (must be near the place)
     # ----------------------------------------
-    MAX_DISTANCE_MILES = 0.5
+    MAX_DISTANCE_MILES = 1.0
 
     if reporter_lat is None or reporter_lng is None:
         return jsonify({
