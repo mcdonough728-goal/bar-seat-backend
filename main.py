@@ -64,9 +64,10 @@ def submit():
     place_id = data.get("place_id")
     seats = data.get("seats")
     has_bar_seating = data.get("has_bar_seating")
-    reporter_id = data.get("reporter_id")  # ✅ NEW
-reporter_lat = data.get("reporter_lat")
-reporter_lng = data.get("reporter_lng")
+    reporter_id = data.get("reporter_id")
+
+    reporter_lat = data.get("reporter_lat")
+    reporter_lng = data.get("reporter_lng")
 
     # Basic validation
     if not place_id:
@@ -86,34 +87,43 @@ reporter_lng = data.get("reporter_lng")
     except Exception:
         return jsonify({"error": "Seats must be a number"}), 400
 
-# ----------------------------------------
-# Proximity check (must be near the place)
-# ----------------------------------------
-MAX_DISTANCE_MILES = 0.5  # adjust if you want
+    # ----------------------------------------
+    # Proximity check (must be near the place)
+    # ----------------------------------------
+    MAX_DISTANCE_MILES = 0.5
 
-if reporter_lat is None or reporter_lng is None:
-    return jsonify({"error": "missing_location", "message": "Please enable location to submit a report."}), 400
-
-try:
-    reporter_lat = float(reporter_lat)
-    reporter_lng = float(reporter_lng)
-except Exception:
-    return jsonify({"error": "bad_location", "message": "Invalid location."}), 400
-
-try:
-    place_lat, place_lng = get_place_lat_lng(place_id)
-    dist = haversine_miles(reporter_lat, reporter_lng, place_lat, place_lng)
-    if dist > MAX_DISTANCE_MILES:
+    if reporter_lat is None or reporter_lng is None:
         return jsonify({
-            "error": "too_far",
-            "message": f"You must be within {MAX_DISTANCE_MILES} miles to submit a report.",
-            "distance_miles": dist
-        }), 403
-except Exception as e:
-    print("PROXIMITY CHECK FAILED:", str(e))
-    # Safer option: block if we can't verify
-    return jsonify({"error": "proximity_check_failed", "message": "Could not verify location. Try again."}), 503
+            "error": "missing_location",
+            "message": "Please enable location to submit a report."
+        }), 400
 
+    try:
+        reporter_lat = float(reporter_lat)
+        reporter_lng = float(reporter_lng)
+    except Exception:
+        return jsonify({
+            "error": "bad_location",
+            "message": "Invalid location."
+        }), 400
+
+    try:
+        place_lat, place_lng = get_place_lat_lng(place_id)
+        dist = haversine_miles(reporter_lat, reporter_lng, place_lat, place_lng)
+
+        if dist > MAX_DISTANCE_MILES:
+            return jsonify({
+                "error": "too_far",
+                "message": f"You must be within {MAX_DISTANCE_MILES} miles to submit a report.",
+                "distance_miles": dist
+            }), 403
+
+    except Exception as e:
+        print("PROXIMITY CHECK FAILED:", str(e))
+        return jsonify({
+            "error": "proximity_check_failed",
+            "message": "Could not verify location. Try again."
+        }), 503
     # ----------------------------------------
     # Cooldown check: has this reporter_id already submitted for this place recently?
     # ----------------------------------------
