@@ -177,13 +177,14 @@ def submit():
                 "distance_miles": dist
             }), 403
 
-    except Exception as e:
-        print("PROXIMITY CHECK FAILED:", repr(e))
-	print("place_id:", place_id)
-        return jsonify({
-            "error": "proximity_check_failed",
-            "message": "Could not verify location. Try again."
-        }), 503
+except Exception as e:
+    print("PROXIMITY CHECK FAILED:", repr(e))
+    print("place_id:", place_id)
+    return jsonify({
+        "error": "proximity_check_failed",
+        "message": "Could not verify location. Try again."
+    }), 503
+
     # ----------------------------------------
     # Cooldown check: has this reporter_id already submitted for this place recently?
     # ----------------------------------------
