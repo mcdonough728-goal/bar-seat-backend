@@ -19,6 +19,38 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+def haversine_miles(lat1, lon1, lat2, lon2):
+    # Earth radius in miles
+    R = 3958.8
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def get_place_lat_lng(place_id):
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing GOOGLE_API_KEY on server")
+
+    url = "https://maps.googleapis.com/maps/api/place/details/json"
+    params = {
+        "place_id": place_id,
+        "fields": "geometry/location",
+        "key": api_key,
+    }
+    r = requests.get(url, params=params, timeout=10)
+    j = r.json()
+
+    if j.get("status") != "OK":
+        raise RuntimeError(f"Places details error: {j.get('status')} {j.get('error_message')}")
+
+    loc = j["result"]["geometry"]["location"]
+    return float(loc["lat"]), float(loc["lng"])
+
 COOLDOWN_MINUTES = 10
 
 # ----------------------------------------
@@ -33,6 +65,8 @@ def submit():
     seats = data.get("seats")
     has_bar_seating = data.get("has_bar_seating")
     reporter_id = data.get("reporter_id")  # ✅ NEW
+reporter_lat = data.get("reporter_lat")
+reporter_lng = data.get("reporter_lng")
 
     # Basic validation
     if not place_id:
@@ -51,6 +85,34 @@ def submit():
             return jsonify({"error": "Seats must be 0 or greater"}), 400
     except Exception:
         return jsonify({"error": "Seats must be a number"}), 400
+
+# ----------------------------------------
+# Proximity check (must be near the place)
+# ----------------------------------------
+MAX_DISTANCE_MILES = 0.5  # adjust if you want
+
+if reporter_lat is None or reporter_lng is None:
+    return jsonify({"error": "missing_location", "message": "Please enable location to submit a report."}), 400
+
+try:
+    reporter_lat = float(reporter_lat)
+    reporter_lng = float(reporter_lng)
+except Exception:
+    return jsonify({"error": "bad_location", "message": "Invalid location."}), 400
+
+try:
+    place_lat, place_lng = get_place_lat_lng(place_id)
+    dist = haversine_miles(reporter_lat, reporter_lng, place_lat, place_lng)
+    if dist > MAX_DISTANCE_MILES:
+        return jsonify({
+            "error": "too_far",
+            "message": f"You must be within {MAX_DISTANCE_MILES} miles to submit a report.",
+            "distance_miles": dist
+        }), 403
+except Exception as e:
+    print("PROXIMITY CHECK FAILED:", str(e))
+    # Safer option: block if we can't verify
+    return jsonify({"error": "proximity_check_failed", "message": "Could not verify location. Try again."}), 503
 
     # ----------------------------------------
     # Cooldown check: has this reporter_id already submitted for this place recently?
