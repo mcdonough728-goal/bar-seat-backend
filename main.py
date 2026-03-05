@@ -451,6 +451,43 @@ def bar_seating_batch():
     return jsonify({"votes": out})
 
 # ----------------------------------------
+# Places Nearby Endpoint
+# ----------------------------------------
+
+@app.route("/places-nearby", methods=["GET"])
+def places_nearby():
+    lat = request.args.get("lat")
+    lng = request.args.get("lng")
+    radius = request.args.get("radius", "8000")
+
+    if not lat or not lng:
+        return jsonify({"error": "missing coordinates"}), 400
+
+    google_key = os.environ.get("GOOGLE_API_KEY")
+
+    if not google_key:
+        return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
+
+    base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
+    restaurant_url = f"{base_url}?location={lat},{lng}&radius={radius}&type=restaurant&key={google_key}"
+    bar_url = f"{base_url}?location={lat},{lng}&radius={radius}&type=bar&key={google_key}"
+
+    try:
+        r1 = requests.get(restaurant_url).json()
+        r2 = requests.get(bar_url).json()
+
+        restaurants = r1.get("results", [])
+        bars = r2.get("results", [])
+
+        return jsonify({
+            "restaurants": restaurants,
+            "bars": bars
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
