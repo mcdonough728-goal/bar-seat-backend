@@ -178,11 +178,9 @@ def submit():
             }), 403
 
     except Exception as e:
-        print("PROXIMITY CHECK FAILED:", repr(e))
-        print("place_id:", place_id)
         return jsonify({
             "error": "proximity_check_failed",
-            "message": "Could not verify location. Try again."
+            "message": f"Could not verify location: {repr(e)}"
         }), 503
 
     # ----------------------------------------
