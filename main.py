@@ -1,10 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 from flask_socketio import SocketIO
 from datetime import datetime, timedelta, timezone
 import math
 import os
 import requests
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -488,6 +489,102 @@ def places_nearby():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ----------------------------------------
+# Places Autocomplete
+# ----------------------------------------
+
+@app.route("/places-autocomplete", methods=["GET"])
+def places_autocomplete():
+    google_key = os.environ.get("GOOGLE_API_KEY")
+    if not google_key:
+        return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
+
+    q = request.args.get("input", "").strip()
+    if len(q) < 2:
+        return jsonify({"predictions": []})
+
+    lat = request.args.get("lat")
+    lng = request.args.get("lng")
+    radius = request.args.get("radius", "50000")
+
+    url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+    params = {
+        "input": q,
+        "types": "establishment",
+        "key": google_key,
+    }
+
+    # optional location bias
+    if lat and lng:
+        params["location"] = f"{lat},{lng}"
+        params["radius"] = radius
+
+    r = requests.get(url, params=params, timeout=10)
+    j = r.json()
+
+    # return raw Google shape so your client code stays the same
+    return jsonify({
+        "status": j.get("status"),
+        "predictions": j.get("predictions", []),
+        "error_message": j.get("error_message"),
+    }), 200
+
+# ----------------------------------------
+# Place Details
+# ----------------------------------------
+
+@app.route("/place-details", methods=["GET"])
+def place_details():
+    google_key = os.environ.get("GOOGLE_API_KEY")
+    if not google_key:
+        return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
+
+    place_id = request.args.get("place_id", "").strip()
+    if not place_id:
+        return jsonify({"error": "missing place_id"}), 400
+
+    fields = request.args.get(
+        "fields",
+        "place_id,name,vicinity,geometry,opening_hours,types,photos,rating,user_ratings_total,price_level"
+    )
+
+    url = "https://maps.googleapis.com/maps/api/place/details/json"
+    params = {
+        "place_id": place_id,
+        "fields": fields,
+        "key": google_key,
+    }
+
+    r = requests.get(url, params=params, timeout=10)
+    j = r.json()
+
+    return jsonify({
+        "status": j.get("status"),
+        "result": j.get("result"),
+        "error_message": j.get("error_message"),
+    }), 200
+
+# ----------------------------------------
+# Place Photos
+# ----------------------------------------
+
+@app.route("/place-photo", methods=["GET"])
+def place_photo():
+    google_key = os.environ.get("GOOGLE_API_KEY")
+    if not google_key:
+        return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
+
+    ref = request.args.get("ref", "").strip()
+    if not ref:
+        return jsonify({"error": "missing ref"}), 400
+
+    maxwidth = request.args.get("maxwidth", "800")
+
+    # Google Photos endpoint returns an image via redirect.
+    # We redirect the client to Google, but the key stays server-side.
+    url = "https://maps.googleapis.com/maps/api/place/photo"
+    qs = f"?maxwidth={maxwidth}&photoreference={ref}&key={google_key}"
+    return redirect(url + qs, code=302)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
