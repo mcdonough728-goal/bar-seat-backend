@@ -6,6 +6,7 @@ import math
 import os
 import requests
 import time
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -31,6 +32,68 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
+NEARBY_CACHE_TTL_MINUTES = 5
+
+def build_nearby_cache_key(lat: str, lng: str, radius: str) -> str:
+    # round slightly so tiny map drags don't explode cache size
+    lat_key = f"{float(lat):.3f}"
+    lng_key = f"{float(lng):.3f}"
+    return f"nearby:{lat_key}:{lng_key}:{radius}"
+
+def get_nearby_cache(cache_key: str):
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/nearby_cache",
+        headers=HEADERS,
+        params={
+            "select": "cache_key,payload,updated_at",
+            "cache_key": f"eq.{cache_key}",
+            "limit": "1",
+        },
+        timeout=10,
+    )
+
+    if res.status_code != 200:
+        print("NEARBY CACHE GET ERROR:", res.status_code, res.text)
+        return None
+
+    rows = res.json() or []
+    if not rows:
+        return None
+
+    row = rows[0]
+    updated_at = row.get("updated_at")
+    payload = row.get("payload")
+
+    if not updated_at or payload is None:
+        return None
+
+    try:
+        updated = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+    if datetime.now(timezone.utc) - updated > timedelta(minutes=NEARBY_CACHE_TTL_MINUTES):
+        return None
+
+    return payload
+
+def set_nearby_cache(cache_key: str, payload):
+    body = {
+        "cache_key": cache_key,
+        "payload": payload,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    res = requests.post(
+        f"{SUPABASE_URL}/rest/v1/nearby_cache",
+        headers={**HEADERS, "Prefer": "resolution=merge-duplicates"},
+        json=body,
+        timeout=10,
+    )
+
+    if res.status_code not in (200, 201):
+        print("NEARBY CACHE SET ERROR:", res.status_code, res.text)
 
 def get_place_lat_lng(place_id: str):
     # 1) Try cache first (fast, no Google quota)
@@ -511,14 +574,30 @@ def places_nearby():
     if not google_key:
         return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
 
+    cache_key = build_nearby_cache_key(lat, lng, radius)
+
     try:
+        cached = get_nearby_cache(cache_key)
+        if cached is not None:
+            print("PLACES_NEARBY CACHE HIT:", cache_key)
+            return jsonify(cached), 200
+
+        print("PLACES_NEARBY CACHE MISS:", cache_key)
+
         restaurants = fetch_nearby_all_pages(lat, lng, radius, "restaurant", google_key, max_pages=3)
         bars = fetch_nearby_all_pages(lat, lng, radius, "bar", google_key, max_pages=3)
 
-        return jsonify({
+        payload = {
             "restaurants": restaurants,
             "bars": bars,
-        }), 200
+        }
+
+        try:
+            set_nearby_cache(cache_key, payload)
+        except Exception as e:
+            print("NEARBY CACHE SAVE FAILED:", repr(e))
+
+        return jsonify(payload), 200
 
     except Exception as e:
         return jsonify({
