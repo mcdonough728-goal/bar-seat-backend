@@ -452,6 +452,49 @@ def bar_seating_batch():
     return jsonify({"votes": out})
 
 # ----------------------------------------
+# Next Page Token Helper
+# ----------------------------------------
+
+def fetch_nearby_all_pages(lat: str, lng: str, radius: str, place_type: str, google_key: str, max_pages: int = 3):
+    base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+    all_results = []
+    next_page_token = None
+
+    for page in range(max_pages):
+        params = {
+            "location": f"{lat},{lng}",
+            "radius": radius,
+            "type": place_type,
+            "key": google_key,
+        }
+
+        if next_page_token:
+            params = {
+                "pagetoken": next_page_token,
+                "key": google_key,
+            }
+
+        r = requests.get(base_url, params=params, timeout=10)
+        j = r.json()
+
+        status = j.get("status")
+        if status not in ("OK", "ZERO_RESULTS"):
+            print(f"NEARBY {place_type} page {page+1} status:", status)
+            print(f"NEARBY {place_type} page {page+1} error:", j.get("error_message"))
+            break
+
+        all_results.extend(j.get("results", []))
+
+        next_page_token = j.get("next_page_token")
+        if not next_page_token:
+            break
+
+        # Google requires a short delay before next_page_token becomes valid
+        time.sleep(2)
+
+    return all_results
+
+# ----------------------------------------
 # Places Nearby Endpoint
 # ----------------------------------------
 
@@ -468,50 +511,19 @@ def places_nearby():
     if not google_key:
         return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
 
-    base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-
     try:
-        restaurant_res = requests.get(
-            base_url,
-            params={
-                "location": f"{lat},{lng}",
-                "radius": radius,
-                "type": "restaurant",
-                "key": google_key,
-            },
-            timeout=10,
-        )
-        bar_res = requests.get(
-            base_url,
-            params={
-                "location": f"{lat},{lng}",
-                "radius": radius,
-                "type": "bar",
-                "key": google_key,
-            },
-            timeout=10,
-        )
-
-        restaurant_json = restaurant_res.json()
-        bar_json = bar_res.json()
-
-        print("PLACES_NEARBY restaurant status:", restaurant_json.get("status"))
-        print("PLACES_NEARBY bar status:", bar_json.get("status"))
-        print("PLACES_NEARBY restaurant error:", restaurant_json.get("error_message"))
-        print("PLACES_NEARBY bar error:", bar_json.get("error_message"))
+        restaurants = fetch_nearby_all_pages(lat, lng, radius, "restaurant", google_key, max_pages=3)
+        bars = fetch_nearby_all_pages(lat, lng, radius, "bar", google_key, max_pages=3)
 
         return jsonify({
-            "restaurants": restaurant_json.get("results", []),
-            "bars": bar_json.get("results", []),
-            "restaurant_status": restaurant_json.get("status"),
-            "bar_status": bar_json.get("status"),
-            "restaurant_error": restaurant_json.get("error_message"),
-            "bar_error": bar_json.get("error_message"),
+            "restaurants": restaurants,
+            "bars": bars,
         }), 200
 
     except Exception as e:
-        return jsonify({"error": f"places_nearby failed: {repr(e)}"}), 500
-
+        return jsonify({
+            "error": f"places_nearby failed: {repr(e)}"
+        }), 500
 # ----------------------------------------
 # Places Autocomplete
 # ----------------------------------------
