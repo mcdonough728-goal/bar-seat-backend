@@ -465,29 +465,52 @@ def places_nearby():
         return jsonify({"error": "missing coordinates"}), 400
 
     google_key = os.environ.get("GOOGLE_API_KEY")
-
     if not google_key:
         return jsonify({"error": "Missing GOOGLE_API_KEY on server"}), 500
 
     base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 
-    restaurant_url = f"{base_url}?location={lat},{lng}&radius={radius}&type=restaurant&key={google_key}"
-    bar_url = f"{base_url}?location={lat},{lng}&radius={radius}&type=bar&key={google_key}"
-
     try:
-        r1 = requests.get(restaurant_url).json()
-        r2 = requests.get(bar_url).json()
+        restaurant_res = requests.get(
+            base_url,
+            params={
+                "location": f"{lat},{lng}",
+                "radius": radius,
+                "type": "restaurant",
+                "key": google_key,
+            },
+            timeout=10,
+        )
+        bar_res = requests.get(
+            base_url,
+            params={
+                "location": f"{lat},{lng}",
+                "radius": radius,
+                "type": "bar",
+                "key": google_key,
+            },
+            timeout=10,
+        )
 
-        restaurants = r1.get("results", [])
-        bars = r2.get("results", [])
+        restaurant_json = restaurant_res.json()
+        bar_json = bar_res.json()
+
+        print("PLACES_NEARBY restaurant status:", restaurant_json.get("status"))
+        print("PLACES_NEARBY bar status:", bar_json.get("status"))
+        print("PLACES_NEARBY restaurant error:", restaurant_json.get("error_message"))
+        print("PLACES_NEARBY bar error:", bar_json.get("error_message"))
 
         return jsonify({
-            "restaurants": restaurants,
-            "bars": bars
-        })
+            "restaurants": restaurant_json.get("results", []),
+            "bars": bar_json.get("results", []),
+            "restaurant_status": restaurant_json.get("status"),
+            "bar_status": bar_json.get("status"),
+            "restaurant_error": restaurant_json.get("error_message"),
+            "bar_error": bar_json.get("error_message"),
+        }), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"places_nearby failed: {repr(e)}"}), 500
 
 # ----------------------------------------
 # Places Autocomplete
