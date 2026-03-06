@@ -388,16 +388,18 @@ def status_batch():
 
     from datetime import timezone
     now = datetime.now(timezone.utc)
+
     RECENT_WINDOW_MINUTES = 60
 
     statuses = {}
+
     for pid in place_ids:
         pid_rows = grouped.get(pid, [])
 
-	# count reports within the last hour
-	recent_reports = 0
-	for row in pid_rows:
-    	    created_at = datetime.fromisoformat(
+        # count reports within the last hour
+        recent_reports = 0
+        for row in pid_rows:
+            created_at = datetime.fromisoformat(
                 row["created_at"].replace("Z", "+00:00")
             )
             minutes_old = (now - created_at).total_seconds() / 60
