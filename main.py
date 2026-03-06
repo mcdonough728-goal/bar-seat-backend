@@ -505,16 +505,17 @@ def places_autocomplete():
 
     lat = request.args.get("lat")
     lng = request.args.get("lng")
-    radius = request.args.get("radius", "50000")
+    radius = request.args.get("radius", "30000")
 
     url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
     params = {
         "input": q,
         "types": "establishment",
         "key": google_key,
+        "strictbounds": "false",
     }
 
-    # optional location bias
+    # Bias toward user's area, but don't hard-restrict
     if lat and lng:
         params["location"] = f"{lat},{lng}"
         params["radius"] = radius
@@ -522,7 +523,6 @@ def places_autocomplete():
     r = requests.get(url, params=params, timeout=10)
     j = r.json()
 
-    # return raw Google shape so your client code stays the same
     return jsonify({
         "status": j.get("status"),
         "predictions": j.get("predictions", []),
