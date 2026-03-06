@@ -388,12 +388,28 @@ def status_batch():
 
     from datetime import timezone
     now = datetime.now(timezone.utc)
+    RECENT_WINDOW_MINUTES = 60
 
     statuses = {}
     for pid in place_ids:
         pid_rows = grouped.get(pid, [])
+
+	# count reports within the last hour
+	recent_reports = 0
+	for row in pid_rows:
+    	    created_at = datetime.fromisoformat(
+                row["created_at"].replace("Z", "+00:00")
+            )
+            minutes_old = (now - created_at).total_seconds() / 60
+            if minutes_old <= RECENT_WINDOW_MINUTES:
+                recent_reports += 1
+
         if not pid_rows:
-            statuses[pid] = {"average": None, "minutes": None}
+            statuses[pid] = {
+                "average": None,
+                "minutes": None,
+                "recent_reports": 0
+            }
             continue
 
         latest_created_at = datetime.fromisoformat(
@@ -417,7 +433,11 @@ def status_batch():
 
         avg = None if weight_total == 0 else math.floor(weighted_sum / weight_total)
 
-        statuses[pid] = {"average": avg, "minutes": minutes_ago}
+        statuses[pid] = {
+            "average": avg,
+            "minutes": minutes_ago,
+            "recent_reports": recent_reports
+        }
 
     return jsonify({"statuses": statuses})
 
