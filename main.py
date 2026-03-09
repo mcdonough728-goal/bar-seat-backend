@@ -540,7 +540,7 @@ def bar_seating_batch():
 # Next Page Token Helper
 # ----------------------------------------
 
-def fetch_nearby_all_pages(lat: str, lng: str, radius: str, place_type: str, google_key: str, max_pages: int = 3):
+def fetch_nearby_all_pages(lat: str, lng: str, radius: str, place_type: str, google_key: str, max_pages: int = 2):
     base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
     all_results = []
     next_page_token = None
@@ -607,7 +607,7 @@ def places_nearby():
         print("PLACES_NEARBY CACHE MISS:", cache_key)
 
         restaurants = fetch_nearby_all_pages(lat, lng, radius, "restaurant", google_key, max_pages=3)
-        bars = fetch_nearby_all_pages(lat, lng, radius, "bar", google_key, max_pages=3)
+        bars = fetch_nearby_all_pages(lat, lng, radius, "bar", google_key, max_pages=2)
 
         payload = {
             "restaurants": restaurants,
