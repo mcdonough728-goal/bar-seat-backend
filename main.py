@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import math
 import os
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import requests
 from flask import Flask, jsonify, redirect, request
@@ -73,7 +73,7 @@ def build_nearby_cache_key(lat: str, lng: str, radius: str) -> str:
 def supabase_get(
     table: str,
     *,
-    params: dict[str, Any] | None = None,
+    params: Optional[Dict[str, Any]] = None,
     timeout: int = 10,
 ):
     return requests.get(
@@ -87,7 +87,7 @@ def supabase_get(
 def supabase_post(
     table: str,
     *,
-    json_body: dict[str, Any],
+    json_body: Dict[str, Any],
     timeout: int = 10,
     merge_duplicates: bool = False,
 ):
@@ -103,7 +103,7 @@ def supabase_post(
     )
 
 
-def google_get(url: str, *, params: dict[str, Any], timeout: int = 10):
+def google_get(url: str, *, params: Dict[str, Any], timeout: int = 10):
     return requests.get(url, params=params, timeout=timeout)
 
 
@@ -234,7 +234,7 @@ def get_place_lat_lng(place_id: str):
     return lat, lng
 
 
-def calculate_weighted_status(rows: list[dict[str, Any]]):
+def calculate_weighted_status(rows: List[Dict[str, Any]]):
     current_time = now_utc()
     weighted_sum = 0.0
     weight_total = 0.0
@@ -287,7 +287,7 @@ def fetch_nearby_all_pages(
     max_pages: int = 2,
 ):
     base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-    all_results: list[dict[str, Any]] = []
+    all_results: List[Dict[str, Any]] = []
     next_page_token = None
 
     for page in range(max_pages):
