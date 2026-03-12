@@ -381,73 +381,66 @@ def status_batch():
 
     rows = resp.json()
 
-    grouped = {}
-    for r in rows:
-        pid = r["place_id"]
-        grouped.setdefault(pid, []).append(r)
-
     from datetime import timezone
     now = datetime.now(timezone.utc)
-
     RECENT_WINDOW_MINUTES = 60
 
-    statuses = {}
+    # initialize every requested place_id so missing ones still return something
+    statuses = {
+        pid: {
+            "average": None,
+            "minutes": None,
+            "recent_reports": 0,
+            "has_bar_seating": None
+        }
+        for pid in place_ids
+    }
 
-    for pid in place_ids:
-        pid_rows = grouped.get(pid, [])
-        
-        latest_has_bar_seating = None
-        for row in pid_rows:
-            if row.get("has_bar_seating") is not None:
-                latest_has_bar_seating = bool(row.get("has_bar_seating"))
-                break
+    # temporary accumulators for weighted average
+    weighted = {
+        pid: {
+            "weighted_sum": 0.0,
+            "weight_total": 0.0
+        }
+        for pid in place_ids
+    }
 
-        # count reports within the last hour
-        recent_reports = 0
-        for row in pid_rows:
-            created_at = datetime.fromisoformat(
-                row["created_at"].replace("Z", "+00:00")
-            )
-            minutes_old = (now - created_at).total_seconds() / 60
-            if minutes_old <= RECENT_WINDOW_MINUTES:
-                recent_reports += 1
-
-        if not pid_rows:
-            statuses[pid] = {
-                "average": None,
-                "minutes": None,
-                "recent_reports": 0,
-                "has_bar_seating": None
-            }
+    for row in rows:
+        pid = row["place_id"]
+        if pid not in statuses:
             continue
 
-        latest_created_at = datetime.fromisoformat(
-            pid_rows[0]["created_at"].replace("Z", "+00:00")
+        created_at = datetime.fromisoformat(
+            row["created_at"].replace("Z", "+00:00")
         )
-        minutes_ago = int((now - latest_created_at).total_seconds() / 60)
+        minutes_old = (now - created_at).total_seconds() / 60
 
-        weighted_sum = 0
-        weight_total = 0
+        # because rows are ordered newest first, first time we see a pid = latest report
+        if statuses[pid]["minutes"] is None:
+            statuses[pid]["minutes"] = int(minutes_old)
 
-        for row in pid_rows:
+        # newest known has_bar_seating
+        if statuses[pid]["has_bar_seating"] is None and row.get("has_bar_seating") is not None:
+            statuses[pid]["has_bar_seating"] = bool(row.get("has_bar_seating"))
+
+        # recent activity count
+        if minutes_old <= RECENT_WINDOW_MINUTES:
+            statuses[pid]["recent_reports"] += 1
+
+        # weighted average only cares about reports from last 60 minutes
+        weight = max(0, 60 - minutes_old)
+        if weight > 0:
             seats = row["seats"]
-            created_at = datetime.fromisoformat(
-                row["created_at"].replace("Z", "+00:00")
+            weighted[pid]["weighted_sum"] += seats * weight
+            weighted[pid]["weight_total"] += weight
+
+    # finalize averages
+    for pid in place_ids:
+        weight_total = weighted[pid]["weight_total"]
+        if weight_total > 0:
+            statuses[pid]["average"] = math.floor(
+                weighted[pid]["weighted_sum"] / weight_total
             )
-            minutes_old = (now - created_at).total_seconds() / 60
-            weight = max(0, 60 - minutes_old)
-
-            weighted_sum += seats * weight
-            weight_total += weight
-
-        avg = None if weight_total == 0 else math.floor(weighted_sum / weight_total)
-
-        statuses[pid] = {
-            "average": avg,
-            "minutes": minutes_ago,
-            "recent_reports": recent_reports,
-            "has_bar_seating": latest_has_bar_seating
-        }
 
     return jsonify({"statuses": statuses})
 
