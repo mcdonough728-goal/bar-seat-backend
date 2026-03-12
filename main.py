@@ -367,7 +367,7 @@ def status_batch():
     url = (
         f"{SUPABASE_URL}/rest/v1/seat_reports"
         f"?place_id=in.({quoted})"
-        f"&select=place_id,seats,created_at"
+        f"&select=place_id,seats,created_at,has_bar_seating"
         f"&order=created_at.desc"
     )
 
@@ -395,6 +395,12 @@ def status_batch():
 
     for pid in place_ids:
         pid_rows = grouped.get(pid, [])
+        
+        latest_has_bar_seating = None
+        for row in pid_rows:
+            if row.get("has_bar_seating") is not None:
+                latest_has_bar_seating = bool(row.get("has_bar_seating"))
+                break
 
         # count reports within the last hour
         recent_reports = 0
@@ -411,6 +417,7 @@ def status_batch():
                 "average": None,
                 "minutes": None,
                 "recent_reports": 0
+                "has_bar_seating": None
             }
             continue
 
@@ -438,7 +445,8 @@ def status_batch():
         statuses[pid] = {
             "average": avg,
             "minutes": minutes_ago,
-            "recent_reports": recent_reports
+            "recent_reports": recent_reports,
+            "has_bar_seating": latest_has_bar_seating
         }
 
     return jsonify({"statuses": statuses})
