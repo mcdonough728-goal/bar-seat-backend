@@ -416,7 +416,7 @@ def status_batch():
             statuses[pid] = {
                 "average": None,
                 "minutes": None,
-                "recent_reports": 0
+                "recent_reports": 0,
                 "has_bar_seating": None
             }
             continue
