@@ -332,6 +332,7 @@ def submit():
     data = request.json or {}
 
     place_id = data.get("place_id")
+    bar_name = data.get("bar_name")
     seats = data.get("seats")
     has_bar_seating = data.get("has_bar_seating")
     reporter_id = data.get("reporter_id")
@@ -441,6 +442,7 @@ def submit():
 
     payload = {
         "place_id": place_id,
+        "bar_name": bar_name,
         "seats": seats_num,
         "reporter_id": reporter_id,
     }
