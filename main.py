@@ -23,10 +23,15 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-NEARBY_CACHE_TTL_MINUTES = 5
+NEARBY_CACHE_TTL_MINUTES = 15
+AUTOCOMPLETE_CACHE_TTL_SECONDS = 300
+PLACE_DETAILS_CACHE_TTL_SECONDS = 86400
 COOLDOWN_MINUTES = 10
 RECENT_WINDOW_MINUTES = 60
 MAX_SUBMIT_DISTANCE_MILES = 1.0
+
+autocomplete_cache: Dict[str, Dict[str, Any]] = {}
+place_details_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def now_utc() -> datetime:
@@ -65,10 +70,10 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 
 
 def build_nearby_cache_key(lat: str, lng: str, radius: str) -> str:
-    lat_key = f"{float(lat):.3f}"
-    lng_key = f"{float(lng):.3f}"
-    return f"nearby:{lat_key}:{lng_key}:{radius}"
-
+    lat_key = f"{float(lat):.2f}"
+    lng_key = f"{float(lng):.2f}"
+    radius_key = str(int(float(radius)))
+    return f"nearby:{lat_key}:{lng_key}:{radius_key}"
 
 def supabase_get(
     table: str,
@@ -105,6 +110,40 @@ def supabase_post(
 
 def google_get(url: str, *, params: Dict[str, Any], timeout: int = 10):
     return requests.get(url, params=params, timeout=timeout)
+
+
+def get_memory_cache(
+    cache_store: Dict[str, Dict[str, Any]],
+    cache_key: str,
+    ttl_seconds: int,
+):
+    entry = cache_store.get(cache_key)
+    if not entry:
+        return None
+
+    created_at = entry.get("created_at")
+    payload = entry.get("payload")
+
+    if not isinstance(created_at, datetime):
+        cache_store.pop(cache_key, None)
+        return None
+
+    if now_utc() - created_at > timedelta(seconds=ttl_seconds):
+        cache_store.pop(cache_key, None)
+        return None
+
+    return payload
+
+
+def set_memory_cache(
+    cache_store: Dict[str, Dict[str, Any]],
+    cache_key: str,
+    payload: Any,
+):
+    cache_store[cache_key] = {
+        "created_at": now_utc(),
+        "payload": payload,
+    }
 
 
 def get_nearby_cache(cache_key: str):
@@ -278,54 +317,93 @@ def fetch_recent_report_for_cooldown(place_id: str, reporter_id: str):
     return response
 
 
-def fetch_nearby_all_pages(
+def fetch_nearby_page(
     lat: str,
     lng: str,
     radius: str,
     place_type: str,
     google_key: str,
-    max_pages: int = 2,
+    next_page_token: Optional[str] = None,
 ):
     base_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-    all_results: List[Dict[str, Any]] = []
-    next_page_token = None
 
-    for page in range(max_pages):
-        if next_page_token:
-            params = {
-                "pagetoken": next_page_token,
-                "key": google_key,
-            }
-        else:
-            params = {
-                "location": f"{lat},{lng}",
-                "radius": radius,
-                "type": place_type,
-                "key": google_key,
-            }
+    if next_page_token:
+        params = {
+            "pagetoken": next_page_token,
+            "key": google_key,
+        }
+    else:
+        params = {
+            "location": f"{lat},{lng}",
+            "radius": radius,
+            "type": place_type,
+            "key": google_key,
+        }
 
-        response = google_get(base_url, params=params, timeout=10)
-        payload = response.json()
+    response = google_get(base_url, params=params, timeout=10)
+    payload = response.json()
 
-        status = payload.get("status")
-        if status not in ("OK", "ZERO_RESULTS"):
-            print(f"NEARBY {place_type} page {page + 1} status:", status)
-            print(
-                f"NEARBY {place_type} page {page + 1} error:",
-                payload.get("error_message"),
-            )
-            break
+    status = payload.get("status")
+    if status not in ("OK", "ZERO_RESULTS"):
+        print(f"NEARBY {place_type} status:", status)
+        print(f"NEARBY {place_type} error:", payload.get("error_message"))
+        return [], None
 
-        all_results.extend(payload.get("results", []))
+    return payload.get("results", []), payload.get("next_page_token")
 
-        next_page_token = payload.get("next_page_token")
-        if not next_page_token:
-            break
 
-        time.sleep(2)
+def dedupe_places(places: List[Dict[str, Any]]):
+    seen = set()
+    output: List[Dict[str, Any]] = []
 
-    return all_results
+    for place in places:
+        place_id = place.get("place_id")
+        if not place_id or place_id in seen:
+            continue
+        seen.add(place_id)
+        output.append(place)
 
+    return output
+
+
+def fetch_nearby_places_optimized(
+    lat: str,
+    lng: str,
+    radius: str,
+    place_type: str,
+    google_key: str,
+    min_results_before_paging: int = 18,
+    allow_second_page: bool = True,
+):
+    first_page_results, next_page_token = fetch_nearby_page(
+        lat=lat,
+        lng=lng,
+        radius=radius,
+        place_type=place_type,
+        google_key=google_key,
+    )
+
+    all_results = list(first_page_results)
+
+    if len(all_results) >= min_results_before_paging:
+        return dedupe_places(all_results)
+
+    if not allow_second_page or not next_page_token:
+        return dedupe_places(all_results)
+
+    time.sleep(2)
+
+    second_page_results, _ = fetch_nearby_page(
+        lat=lat,
+        lng=lng,
+        radius=radius,
+        place_type=place_type,
+        google_key=google_key,
+        next_page_token=next_page_token,
+    )
+
+    all_results.extend(second_page_results)
+    return dedupe_places(all_results)
 
 @app.route("/submit", methods=["POST"])
 def submit():
@@ -700,11 +778,24 @@ def places_nearby():
 
         print("PLACES_NEARBY CACHE MISS:", cache_key)
 
-        restaurants = fetch_nearby_all_pages(
-            lat, lng, radius, "restaurant", google_key, max_pages=3
+        restaurants = fetch_nearby_places_optimized(
+            lat=lat,
+            lng=lng,
+            radius=radius,
+            place_type="restaurant",
+            google_key=google_key,
+            min_results_before_paging=24,
+            allow_second_page=True,
         )
-        bars = fetch_nearby_all_pages(
-            lat, lng, radius, "bar", google_key, max_pages=2
+
+        bars = fetch_nearby_places_optimized(
+            lat=lat,
+            lng=lng,
+            radius=radius,
+            place_type="bar",
+            google_key=google_key,
+            min_results_before_paging=16,
+            allow_second_page=False,
         )
 
         payload = {
@@ -737,6 +828,20 @@ def places_autocomplete():
     lng = request.args.get("lng")
     radius = request.args.get("radius", "30000")
 
+    normalized_query = " ".join(query.lower().split())
+    lat_key = f"{float(lat):.2f}" if lat else "none"
+    lng_key = f"{float(lng):.2f}" if lng else "none"
+    cache_key = f"autocomplete:{normalized_query}:{lat_key}:{lng_key}:{radius}"
+
+    cached = get_memory_cache(
+        autocomplete_cache,
+        cache_key,
+        AUTOCOMPLETE_CACHE_TTL_SECONDS,
+    )
+    if cached is not None:
+        print("AUTOCOMPLETE CACHE HIT:", cache_key)
+        return jsonify(cached), 200
+
     params = {
         "input": query,
         "types": "establishment",
@@ -755,17 +860,16 @@ def places_autocomplete():
     )
     payload = response.json()
 
-    return (
-        jsonify(
-            {
-                "status": payload.get("status"),
-                "predictions": payload.get("predictions", []),
-                "error_message": payload.get("error_message"),
-            }
-        ),
-        200,
-    )
+    response_payload = {
+        "status": payload.get("status"),
+        "predictions": payload.get("predictions", []),
+        "error_message": payload.get("error_message"),
+    }
 
+    if response_payload["status"] == "OK":
+        set_memory_cache(autocomplete_cache, cache_key, response_payload)
+
+    return jsonify(response_payload), 200
 
 @app.route("/place-details", methods=["GET"])
 def place_details():
@@ -783,6 +887,16 @@ def place_details():
         "place_id,name,vicinity,geometry,opening_hours,types,photos,rating,user_ratings_total,price_level",
     )
 
+    cache_key = f"place-details:{place_id}:{fields}"
+    cached = get_memory_cache(
+        place_details_cache,
+        cache_key,
+        PLACE_DETAILS_CACHE_TTL_SECONDS,
+    )
+    if cached is not None:
+        print("PLACE DETAILS CACHE HIT:", cache_key)
+        return jsonify(cached), 200
+
     response = google_get(
         "https://maps.googleapis.com/maps/api/place/details/json",
         params={
@@ -794,17 +908,16 @@ def place_details():
     )
     payload = response.json()
 
-    return (
-        jsonify(
-            {
-                "status": payload.get("status"),
-                "result": payload.get("result"),
-                "error_message": payload.get("error_message"),
-            }
-        ),
-        200,
-    )
+    response_payload = {
+        "status": payload.get("status"),
+        "result": payload.get("result"),
+        "error_message": payload.get("error_message"),
+    }
 
+    if response_payload["status"] == "OK":
+        set_memory_cache(place_details_cache, cache_key, response_payload)
+
+    return jsonify(response_payload), 200
 
 @app.route("/place-photo", methods=["GET"])
 def place_photo():
