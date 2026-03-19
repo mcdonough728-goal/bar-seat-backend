@@ -166,6 +166,59 @@ def get_hidden_place_ids(place_ids: List[str]) -> set[str]:
     }
 
 
+def filter_hidden_places_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    restaurants = payload.get("restaurants", []) or []
+    bars = payload.get("bars", []) or []
+
+    all_place_ids = [
+        place.get("place_id")
+        for place in [*restaurants, *bars]
+        if isinstance(place, dict)
+        and isinstance(place.get("place_id"), str)
+        and place.get("place_id")
+    ]
+
+    hidden_place_ids = get_hidden_place_ids(all_place_ids)
+
+    if not hidden_place_ids:
+        return payload
+
+    return {
+        **payload,
+        "restaurants": [
+            place
+            for place in restaurants
+            if place.get("place_id") not in hidden_place_ids
+        ],
+        "bars": [
+            place
+            for place in bars
+            if place.get("place_id") not in hidden_place_ids
+        ],
+    }
+
+
+def filter_hidden_places_from_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    place_ids = [
+        place.get("place_id")
+        for place in results
+        if isinstance(place, dict)
+        and isinstance(place.get("place_id"), str)
+        and place.get("place_id")
+    ]
+
+    hidden_place_ids = get_hidden_place_ids(place_ids)
+
+    if not hidden_place_ids:
+        return results
+
+    return [
+        place
+        for place in results
+        if place.get("place_id") not in hidden_place_ids
+    ]
+
+
 def get_memory_cache(
     cache_store: Dict[str, Dict[str, Any]],
     cache_key: str,
@@ -895,7 +948,8 @@ def places_nearby():
         cached = get_nearby_cache(cache_key)
         if cached is not None:
             print("PLACES_NEARBY CACHE HIT:", cache_key)
-            return jsonify(cached), 200
+            filtered_cached = filter_hidden_places_from_payload(cached)
+            return jsonify(filtered_cached), 200
 
         print("PLACES_NEARBY CACHE MISS:", cache_key)
 
@@ -924,13 +978,15 @@ def places_nearby():
             "bars_next_page_token": bars_next_page_token,
         }
 
+        filtered_payload = filter_hidden_places_from_payload(payload)
+
         try:
             set_nearby_cache(cache_key, payload)
         except Exception as error:
             print("NEARBY CACHE SAVE FAILED:", repr(error))
 
-        return jsonify(payload), 200
-    except Exception as error:
+        return jsonify(filtered_payload), 200
+        except Exception as error:
         return jsonify({"error": f"places_nearby failed: {repr(error)}"}), 500
 
 @app.route("/places-nearby-page", methods=["GET"])
@@ -963,11 +1019,13 @@ def places_nearby_page():
 
         if status in ("OK", "ZERO_RESULTS"):
             results = dedupe_places(payload.get("results", []))
+            filtered_results = filter_hidden_places_from_results(results)
+
             return (
                 jsonify(
                     {
                         "place_type": place_type,
-                        "results": results,
+                        "results": filtered_results,
                         "next_page_token": payload.get("next_page_token"),
                     }
                 ),
