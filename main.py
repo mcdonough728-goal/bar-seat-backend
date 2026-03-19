@@ -899,48 +899,29 @@ def places_nearby():
 
         print("PLACES_NEARBY CACHE MISS:", cache_key)
 
-        restaurants = fetch_nearby_places_optimized(
+        restaurants, restaurants_next_page_token = fetch_nearby_page(
             lat=lat,
             lng=lng,
             radius=radius,
             place_type="restaurant",
             google_key=google_key,
-            min_results_before_paging=24,
-            allow_second_page=True,
         )
-
-        bars = fetch_nearby_places_optimized(
+        bars, bars_next_page_token = fetch_nearby_page(
             lat=lat,
             lng=lng,
             radius=radius,
             place_type="bar",
             google_key=google_key,
-            min_results_before_paging=16,
-            allow_second_page=False,
         )
 
-        all_place_ids = [
-            place.get("place_id")
-            for place in [*restaurants, *bars]
-            if isinstance(place.get("place_id"), str) and place.get("place_id")
-        ]
-
-        hidden_place_ids = get_hidden_place_ids(all_place_ids)
-
-        restaurants = [
-            place
-            for place in restaurants
-            if place.get("place_id") not in hidden_place_ids
-        ]
-        bars = [
-            place
-            for place in bars
-            if place.get("place_id") not in hidden_place_ids
-        ]
+        restaurants = dedupe_places(restaurants)
+        bars = dedupe_places(bars)
 
         payload = {
             "restaurants": restaurants,
             "bars": bars,
+            "restaurants_next_page_token": restaurants_next_page_token,
+            "bars_next_page_token": bars_next_page_token,
         }
 
         try:
@@ -951,6 +932,56 @@ def places_nearby():
         return jsonify(payload), 200
     except Exception as error:
         return jsonify({"error": f"places_nearby failed: {repr(error)}"}), 500
+
+@app.route("/places-nearby-page", methods=["GET"])
+def places_nearby_page():
+    page_token = request.args.get("page_token", "").strip()
+    place_type = request.args.get("place_type", "").strip()
+
+    if not page_token:
+        return json_error("missing page_token", 400)
+
+    if place_type not in ("bar", "restaurant"):
+        return json_error("invalid place_type", 400)
+
+    try:
+        google_key = require_google_api_key()
+    except RuntimeError as error:
+        return json_error(str(error), 500)
+
+    for attempt in range(4):
+        response = google_get(
+            "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+            params={
+                "pagetoken": page_token,
+                "key": google_key,
+            },
+            timeout=10,
+        )
+        payload = response.json()
+        status = payload.get("status")
+
+        if status in ("OK", "ZERO_RESULTS"):
+            results = dedupe_places(payload.get("results", []))
+            return (
+                jsonify(
+                    {
+                        "place_type": place_type,
+                        "results": results,
+                        "next_page_token": payload.get("next_page_token"),
+                    }
+                ),
+                200,
+            )
+
+        if status == "INVALID_REQUEST":
+            time.sleep(2)
+            continue
+
+        print("PLACES_NEARBY_PAGE ERROR:", status, payload.get("error_message"))
+        return jsonify({"error": "places_nearby_page failed", "status": status}), 500
+
+    return jsonify({"error": "page token not ready"}), 503
 
 
 @app.route("/places-autocomplete", methods=["GET"])
