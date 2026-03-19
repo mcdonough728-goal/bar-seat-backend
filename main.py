@@ -987,6 +987,9 @@ def places_nearby():
 
         return jsonify(filtered_payload), 200
 
+    except Exception as error:
+        return jsonify({"error": f"places_nearby failed: {repr(error)}"}), 500
+
 @app.route("/places-nearby-page", methods=["GET"])
 def places_nearby_page():
     page_token = request.args.get("page_token", "").strip()
