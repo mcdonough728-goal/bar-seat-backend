@@ -16,6 +16,11 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+ADMIN_REPORTER_IDS = {
+    value.strip()
+    for value in os.environ.get("ADMIN_REPORTER_IDS", "").split(",")
+    if value.strip()
+}
 
 HEADERS = {
     "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -108,8 +113,57 @@ def supabase_post(
     )
 
 
+def supabase_patch(
+    table: str,
+    *,
+    json_body: Dict[str, Any],
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = 10,
+):
+    return requests.patch(
+        f"{SUPABASE_URL}/rest/v1/{table}",
+        headers=HEADERS,
+        params=params,
+        json=json_body,
+        timeout=timeout,
+    )
+
+
 def google_get(url: str, *, params: Dict[str, Any], timeout: int = 10):
     return requests.get(url, params=params, timeout=timeout)
+
+
+def is_admin_reporter(reporter_id: Optional[str]) -> bool:
+    if not reporter_id:
+        return False
+    return reporter_id in ADMIN_REPORTER_IDS
+
+
+def get_hidden_place_ids(place_ids: List[str]) -> set[str]:
+    if not place_ids:
+        return set()
+
+    quoted = ",".join([f'"{place_id}"' for place_id in place_ids])
+
+    response = supabase_get(
+        "hidden_places",
+        params={
+            "select": "place_id",
+            "place_id": f"in.({quoted})",
+            "active": "eq.true",
+        },
+    )
+
+    if response.status_code != 200:
+        print("HIDDEN PLACES GET ERROR:", response.status_code, response.text)
+        return set()
+
+    rows = response.json() or []
+    return {
+        row.get("place_id")
+        for row in rows
+        if isinstance(row.get("place_id"), str) and row.get("place_id")
+    }
 
 
 def get_memory_cache(
@@ -754,6 +808,73 @@ def bar_seating_batch():
     return jsonify({"votes": output})
 
 
+@app.route("/admin/can-hide-place", methods=["GET"])
+def admin_can_hide_place():
+    reporter_id = request.args.get("reporter_id", "").strip()
+    return jsonify({"allowed": is_admin_reporter(reporter_id)}), 200
+
+
+@app.route("/admin/hide-place", methods=["POST"])
+def admin_hide_place():
+    data = request.json or {}
+
+    reporter_id = str(data.get("reporter_id") or "").strip()
+    place_id = str(data.get("place_id") or "").strip()
+    name = str(data.get("name") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+
+    if not is_admin_reporter(reporter_id):
+        return json_error("forbidden", 403)
+
+    if not place_id:
+        return json_error("missing place_id", 400)
+
+    existing = supabase_get(
+        "hidden_places",
+        params={
+            "select": "place_id",
+            "place_id": f"eq.{place_id}",
+            "limit": "1",
+        },
+    )
+
+    if existing.status_code != 200:
+        return json_error("failed to check hidden place", 500, details=existing.text)
+
+    rows = existing.json() or []
+
+    if rows:
+        response = supabase_patch(
+            "hidden_places",
+            json_body={
+                "name": name or None,
+                "reason": reason or "Hidden by admin",
+                "hidden_by": reporter_id,
+                "active": True,
+                "updated_at": now_utc().isoformat(),
+            },
+            params={
+                "place_id": f"eq.{place_id}",
+            },
+        )
+    else:
+        response = supabase_post(
+            "hidden_places",
+            json_body={
+                "place_id": place_id,
+                "name": name or None,
+                "reason": reason or "Hidden by admin",
+                "hidden_by": reporter_id,
+                "active": True,
+                "updated_at": now_utc().isoformat(),
+            },
+        )
+
+    if response.status_code not in (200, 201, 204):
+        return json_error("failed to hide place", 500, details=response.text)
+
+    return jsonify({"ok": True, "place_id": place_id}), 200
+
 @app.route("/places-nearby", methods=["GET"])
 def places_nearby():
     lat = request.args.get("lat")
@@ -797,6 +918,25 @@ def places_nearby():
             min_results_before_paging=16,
             allow_second_page=False,
         )
+
+                all_place_ids = [
+            place.get("place_id")
+            for place in [*restaurants, *bars]
+            if isinstance(place.get("place_id"), str) and place.get("place_id")
+        ]
+
+        hidden_place_ids = get_hidden_place_ids(all_place_ids)
+
+        restaurants = [
+            place
+            for place in restaurants
+            if place.get("place_id") not in hidden_place_ids
+        ]
+        bars = [
+            place
+            for place in bars
+            if place.get("place_id") not in hidden_place_ids
+        ]
 
         payload = {
             "restaurants": restaurants,
