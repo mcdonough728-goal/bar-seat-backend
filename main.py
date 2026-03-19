@@ -919,7 +919,7 @@ def places_nearby():
             allow_second_page=False,
         )
 
-                all_place_ids = [
+        all_place_ids = [
             place.get("place_id")
             for place in [*restaurants, *bars]
             if isinstance(place.get("place_id"), str) and place.get("place_id")
